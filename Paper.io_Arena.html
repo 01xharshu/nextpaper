@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Paper.io Arena - Mobile & Desktop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Fredoka', sans-serif;
+            background-color: #f0f4f8;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.15);
+        }
+        .btn-3d {
+            transition: transform 0.1s, box-shadow 0.1s;
+            box-shadow: 0 6px 0 rgba(0, 0, 0, 0.2);
+        }
+        .btn-3d:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 rgba(0, 0, 0, 0.2);
+        }
+        .boost-btn-active {
+            transform: scale(0.92);
+            box-shadow: 0 0 25px rgba(250, 204, 21, 0.9);
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.7; }
+            50% { transform: scale(1.05); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.7; }
+        }
+        .animate-pulse-slow {
+            animation: pulse-ring 2s infinite ease-in-out;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden bg-slate-100">
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Top HUD: Leaderboard & Player Stats -->
+    <div id="hud" class="hidden absolute top-0 left-0 w-full p-3 sm:p-4 pointer-events-none flex justify-between items-start z-10">
+        <!-- Player Territory, Level Target & Kills -->
+        <div class="glass-panel rounded-2xl p-3 flex flex-col gap-1 min-w-[145px]">
+            <div class="flex items-center justify-between border-b border-slate-200/80 pb-1 mb-0.5">
+                <span id="levelBadge" class="text-xs font-extrabold uppercase tracking-wider text-indigo-600">Level 1</span>
+                <span class="text-[11px] font-bold text-slate-400">Goal: <strong id="levelGoalText" class="text-slate-700">15%</strong></span>
+            </div>
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Territory</span>
+                <span id="playerPercent" class="text-lg font-bold text-indigo-600">0.0%</span>
+            </div>
+            <div class="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                <div id="territoryBar" class="bg-indigo-600 h-full transition-all duration-300" style="width: 1%"></div>
+            </div>
+            <div class="flex items-center justify-between mt-1 text-xs font-semibold text-slate-600">
+                <span>Eliminations: <strong id="killCount" class="text-rose-500">0</strong></span>
+            </div>
+        </div>
+
+        <!-- Live Leaderboard -->
+        <div class="glass-panel rounded-2xl p-2.5 sm:p-3 min-w-[140px] sm:min-w-[170px]">
+            <div class="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5 text-center">Top Conquerors</div>
+            <div id="leaderboardList" class="flex flex-col gap-1 text-xs sm:text-sm font-semibold">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom HUD: Boost Meter, Boost Action Button & Mini-map -->
+    <div id="bottomHud" class="hidden absolute bottom-0 left-0 w-full p-4 pointer-events-none flex justify-between items-end z-10">
+        <!-- Mini-map -->
+        <div class="glass-panel rounded-xl p-1.5 shadow-lg">
+            <canvas id="minimapCanvas" width="100" height="100" class="rounded-lg bg-slate-200/80 block w-[85px] h-[85px] sm:w-[110px] sm:h-[110px]"></canvas>
+        </div>
+
+        <!-- Virtual Joystick Indicator (Appears on Touch) -->
+        <div id="joystickZone" class="hidden fixed pointer-events-none z-20">
+            <div id="joystickBase" class="w-24 h-24 rounded-full border-2 border-slate-400/40 bg-slate-900/10 flex items-center justify-center -translate-x-1/2 -translate-y-1/2">
+                <div id="joystickStick" class="w-10 h-10 rounded-full bg-white/80 shadow-md"></div>
+            </div>
+        </div>
+
+        <!-- Boost Controls -->
+        <div class="flex flex-col items-end gap-2 pointer-events-auto">
+            <!-- Boost Energy Bar -->
+            <div class="glass-panel rounded-full px-3 py-1.5 flex items-center gap-2 shadow-md">
+                <span class="text-xs font-bold text-amber-500">⚡ BOOST</span>
+                <div class="w-24 sm:w-32 h-3 bg-slate-200 rounded-full overflow-hidden p-0.5">
+                    <div id="boostBar" class="h-full bg-gradient-to-r from-amber-400 to-orange-500 rounded-full transition-all duration-75" style="width: 50%"></div>
+                </div>
+            </div>
+
+            <!-- Tactile Boost Button (Great for Mobile Thumb) -->
+            <button id="boostBtn" class="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-amber-500 to-yellow-400 text-white font-bold shadow-xl border-4 border-white flex flex-col items-center justify-center active:scale-95 transition-transform cursor-pointer">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 sm:h-8 sm:w-8 drop-shadow" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd" />
+                </svg>
+                <span class="text-[10px] tracking-wider uppercase font-extrabold">TURBO</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Floating Kill / Capture Toast Notification -->
+    <div id="toastContainer" class="fixed top-24 left-1/2 -translate-x-1/2 pointer-events-none z-30 flex flex-col items-center gap-1"></div>
+
+    <!-- Start Menu Modal -->
+    <div id="startScreen" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-40">
+        <div class="glass-panel rounded-3xl p-6 sm:p-8 max-w-md w-full text-center shadow-2xl border-4 border-white">
+            <div id="startLevelPill" class="inline-block px-3 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold uppercase tracking-widest mb-2">
+                Level 1 • Goal: 15% Area
+            </div>
+            <h1 class="text-4xl sm:text-5xl font-extrabold text-slate-800 tracking-tight mb-2">
+                PAPER<span class="text-indigo-600">.IO</span>
+            </h1>
+            <p class="text-slate-600 text-sm sm:text-base mb-6">
+                Conquer the target territory to advance to the next level! Collect <span class="text-amber-500 font-bold">Energy Orbs</span> to charge your Turbo Boost.
+            </p>
+
+            <!-- Player Name Input (Color is assigned randomly) -->
+            <div class="mb-6 text-left">
+                <label class="block text-xs font-bold uppercase text-slate-500 mb-1.5 ml-1">Player Name</label>
+                <input type="text" id="playerNameInput" maxlength="12" value="You" placeholder="Enter nickname..." 
+                    class="w-full px-4 py-3 rounded-xl bg-white border-2 border-slate-200 focus:border-indigo-500 focus:outline-none font-bold text-slate-700 text-base">
+            </div>
+
+            <button id="startBtn" class="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-extrabold text-xl tracking-wide btn-3d cursor-pointer animate-pulse-slow">
+                PLAY LEVEL 1
+            </button>
+
+            <div class="mt-5 pt-4 border-t border-slate-200/80 grid grid-cols-2 gap-2 text-xs text-slate-500 font-medium">
+                <div class="flex items-center justify-center gap-1.5">
+                    <span class="bg-slate-200 px-2 py-0.5 rounded font-bold text-slate-700">Touch / Drag</span> Steer
+                </div>
+                <div class="flex items-center justify-center gap-1.5">
+                    <span class="bg-amber-100 px-2 py-0.5 rounded font-bold text-amber-700">Turbo / Space</span> Boost
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Level Complete Modal -->
+    <div id="levelCompleteScreen" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
+        <div class="glass-panel rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl border-4 border-white">
+            <div class="inline-block px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider mb-2">
+                Target Reached!
+            </div>
+            <h2 id="levelCompleteTitle" class="text-3xl sm:text-4xl font-extrabold text-slate-800 mb-2">LEVEL 1 CLEAR!</h2>
+            <p id="nextLevelPreview" class="text-slate-600 text-sm font-medium mb-5">
+                Next Up: Level 2 (Goal: 25% Area)
+            </p>
+            
+            <div class="bg-slate-100/90 rounded-2xl p-4 mb-6 grid grid-cols-2 gap-4 border border-slate-200">
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase">Area Captured</div>
+                    <div id="clearPercent" class="text-2xl font-extrabold text-indigo-600">0.0%</div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase">Eliminations</div>
+                    <div id="clearKills" class="text-2xl font-extrabold text-rose-500">0</div>
+                </div>
+            </div>
+
+            <button id="nextLevelBtn" class="w-full py-4 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-extrabold text-xl tracking-wide btn-3d cursor-pointer">
+                NEXT LEVEL ➔
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="gameOverScreen" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-4 z-50">
+        <div class="glass-panel rounded-3xl p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl border-4 border-white">
+            <div id="deathReason" class="inline-block px-3 py-1 rounded-full bg-rose-100 text-rose-600 text-xs font-bold uppercase tracking-wider mb-2">
+                Eliminated!
+            </div>
+            <h2 class="text-3xl sm:text-4xl font-extrabold text-slate-800 mb-4">GAME OVER</h2>
+            
+            <div class="bg-slate-100/90 rounded-2xl p-4 mb-6 grid grid-cols-2 gap-4 border border-slate-200">
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase">Best Area</div>
+                    <div id="finalPercent" class="text-2xl font-extrabold text-indigo-600">0.0%</div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-slate-400 uppercase">Eliminations</div>
+                    <div id="finalKills" class="text-2xl font-extrabold text-rose-500">0</div>
+                </div>
+            </div>
+
+            <button id="restartBtn" class="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-extrabold text-xl tracking-wide btn-3d cursor-pointer">
+                RETRY LEVEL
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * PAPER.IO ARENA - COMPLETE ENGINE
+         * Features:
+         * - Grid-based territory ownership with Queue-based Flood Fill capture
+         * - Smooth continuous movement with turning radius
+         * - Intelligent NPC AI (roaming, expanding territory, returning to base, hunting trails)
+         * - Collectible Energy Orbs & Territory Capture Boost rewards
+         * - Mobile Touch Virtual Joystick + Dedicated Turbo Boost Button
+         */
+
+        // --- CONFIGURATION & CONSTANTS ---
+        const GRID_SIZE = 340;        // High-resolution 340x340 micro-grid for smooth shapes
+        const CELL_SIZE = 8;          // Fine 8px cells (eliminates blocky pixels!)
+        const WORLD_SIZE = GRID_SIZE * CELL_SIZE; // 2720x2720 arena
+        const BASE_SPEED = 240;       // Pixels per second
+        const BOOST_SPEED = 400;      // Boosted speed
+        const TURN_SPEED = 6.8;       // Radians per second
+        const PLAYER_RADIUS = 14;
+        const BOT_COUNT = 7;
+        const MAX_ORBS = 50;
+        const SPAWN_RADIUS = 6;       // 13x13 micro-cells (~104x104px initial base)
+
+        const PALETTES = [
+            { name: 'Indigo', main: '#4f46e5', dark: '#3730a3', light: '#c7d2fe', trail: 'rgba(79, 70, 229, 0.45)' },
+            { name: 'Crimson', main: '#e11d48', dark: '#9f1239', light: '#fecdd3', trail: 'rgba(225, 29, 72, 0.45)' },
+            { name: 'Emerald', main: '#10b981', dark: '#065f46', light: '#a7f3d0', trail: 'rgba(16, 185, 129, 0.45)' },
+            { name: 'Amber', main: '#f59e0b', dark: '#b45309', light: '#fde68a', trail: 'rgba(245, 158, 11, 0.45)' },
+            { name: 'Cyan', main: '#06b6d4', dark: '#155e75', light: '#a5f3fc', trail: 'rgba(6, 182, 212, 0.45)' },
+            { name: 'Purple', main: '#9333ea', dark: '#581c87', light: '#e9d5ff', trail: 'rgba(147, 51, 234, 0.45)' },
+            { name: 'Coral', main: '#f97316', dark: '#9a3412', light: '#fed7aa', trail: 'rgba(249, 115, 22, 0.45)' },
+            { name: 'Pink', main: '#ec4899', dark: '#831843', light: '#fbcfe8', trail: 'rgba(236, 72, 153, 0.45)' }
+        ];
+
+        const BOT_NAMES = ['Viper', 'Shadow', 'Nova', 'Apex', 'Blaze', 'Echo', 'Titan', 'Frost', 'Pixel', 'Zenith'];
+
+        // --- DOM ELEMENTS ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+
+        const startScreen = document.getElementById('startScreen');
+        const levelCompleteScreen = document.getElementById('levelCompleteScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const hud = document.getElementById('hud');
+        const bottomHud = document.getElementById('bottomHud');
+        const playerNameInput = document.getElementById('playerNameInput');
+        const startBtn = document.getElementById('startBtn');
+        const nextLevelBtn = document.getElementById('nextLevelBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const boostBtn = document.getElementById('boostBtn');
+        const boostBar = document.getElementById('boostBar');
+        const levelBadge = document.getElementById('levelBadge');
+        const levelGoalText = document.getElementById('levelGoalText');
+        const playerPercentEl = document.getElementById('playerPercent');
+        const territoryBar = document.getElementById('territoryBar');
+        const killCountEl = document.getElementById('killCount');
+        const leaderboardList = document.getElementById('leaderboardList');
+        const toastContainer = document.getElementById('toastContainer');
+        const joystickZone = document.getElementById('joystickZone');
+        const joystickBase = document.getElementById('joystickBase');
+        const joystickStick = document.getElementById('joystickStick');
+
+        // --- GAME & LEVEL STATE ---
+        let currentLevel = 1;
+        let isRunning = false;
+        let lastTime = 0;
+        let ownerGrid = []; // 0 = empty, >0 = entity ID
+        let trailGrid = []; // 0 = empty, >0 = entity ID
+        let entities = [];
+        let orbs = [];
+        let particles = [];
+        let floatingTexts = [];
+        let player = null;
+        let camera = { x: WORLD_SIZE / 2, y: WORLD_SIZE / 2, zoom: 1 };
+
+        // Input state
+        let keys = {};
+        let isBoostingInput = false;
+        let touchId = null;
+        let touchStart = { x: 0, y: 0 };
+
+        // --- LEVEL CONFIGURATION HELPER ---
+        function getLevelConfig(lvl) {
+            return {
+                level: lvl,
+                // Level 1 = 15%, Level 2 = 25%, Level 3 = 35%, capping at 75%
+                targetPercent: Math.min(75, 15 + (lvl - 1) * 10),
+                // More bots in higher levels (starts at 5, scales up to 9)
+                botCount: Math.min(9, 4 + lvl),
+                // Bots get slightly faster in higher levels
+                botSpeedMultiplier: Math.min(1.22, 0.92 + (lvl - 1) * 0.05)
+            };
+        }
+
+        function initUI() {
+            const cfg = getLevelConfig(currentLevel);
+            document.getElementById('startLevelPill').innerText = `Level ${cfg.level} • Goal: ${cfg.targetPercent}% Area`;
+            startBtn.innerText = `PLAY LEVEL ${cfg.level}`;
+        }
+
+        // --- RESIZE HANDLING (WITH RETINA / HIDPI CRISP SCALING) ---
+        let viewWidth = window.innerWidth;
+        let viewHeight = window.innerHeight;
+
+        function resizeCanvas() {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            viewWidth = window.innerWidth;
+            viewHeight = window.innerHeight;
+            canvas.width = viewWidth * dpr;
+            canvas.height = viewHeight * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            // Adjust zoom slightly for smaller mobile screens so player sees enough arena
+            camera.zoom = viewWidth < 640 ? 0.82 : 1.0;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- TOAST NOTIFICATIONS ---
+        function showToast(text, color = '#4f46e5') {
+            const el = document.createElement('div');
+            el.className = 'px-4 py-1.5 rounded-full text-white font-bold text-xs sm:text-sm shadow-lg transition-all duration-500 transform translate-y-0 opacity-100';
+            el.style.backgroundColor = color;
+            el.innerText = text;
+            toastContainer.appendChild(el);
+            setTimeout(() => {
+                el.style.opacity = '0';
+                el.style.transform = 'translateY(-15px)';
+                setTimeout(() => el.remove(), 500);
+            }, 1800);
+        }
+
+        // --- ENTITY CLASS (PLAYER & NPC BOTS) ---
+        class Entity {
+            constructor(id, name, palette, isPlayer = false) {
+                this.id = id;
+                this.name = name;
+                this.palette = palette;
+                this.isPlayer = isPlayer;
+                this.alive = true;
+                this.kills = 0;
+                this.territoryCount = 0;
+                this.bestPercent = 0;
+
+                // Boost mechanics
+                this.boostEnergy = isPlayer ? 60 : 40; // 0 to 100
+                this.isBoosting = false;
+
+                // Movement
+                this.x = 0;
+                this.y = 0;
+                this.angle = Math.random() * Math.PI * 2;
+                this.targetAngle = this.angle;
+                this.trailCells = [];  // Grid cells for fast collision & flood fill
+                this.trailPoints = []; // Smooth world coordinates {x, y} for vector ribbon rendering
+                this.lastGridPos = { gx: -1, gy: -1 };
+
+                // AI State
+                this.aiState = 'EXPAND'; // 'EXPAND', 'RETURN', 'HUNT'
+                this.aiTimer = 0;
+                this.aiDesiredLength = 24 + Math.floor(Math.random() * 32);
+
+                this.spawn();
+            }
+
+            spawn() {
+                // Find a safe spawn location away from other entities
+                let bestX = Math.floor(GRID_SIZE / 2);
+                let bestY = Math.floor(GRID_SIZE / 2);
+                let maxMinDist = -1;
+                const safeMargin = SPAWN_RADIUS + 18;
+
+                for (let attempt = 0; attempt < 30; attempt++) {
+                    const gx = safeMargin + Math.floor(Math.random() * (GRID_SIZE - safeMargin * 2));
+                    const gy = safeMargin + Math.floor(Math.random() * (GRID_SIZE - safeMargin * 2));
+                    let minDist = Infinity;
+
+                    for (const other of entities) {
+                        if (!other.alive || other.id === this.id) continue;
+                        const ox = Math.floor(other.x / CELL_SIZE);
+                        const oy = Math.floor(other.y / CELL_SIZE);
+                        const d = Math.hypot(gx - ox, gy - oy);
+                        if (d < minDist) minDist = d;
+                    }
+
+                    if (minDist > maxMinDist) {
+                        maxMinDist = minDist;
+                        bestX = gx;
+                        bestY = gy;
+                    }
+                }
+
+                this.x = (bestX + 0.5) * CELL_SIZE;
+                this.y = (bestY + 0.5) * CELL_SIZE;
+                this.lastGridPos = { gx: bestX, gy: bestY };
+                this.trailCells = [];
+                this.trailPoints = [];
+
+                // Claim smooth circular/rounded home territory
+                for (let dx = -SPAWN_RADIUS; dx <= SPAWN_RADIUS; dx++) {
+                    for (let dy = -SPAWN_RADIUS; dy <= SPAWN_RADIUS; dy++) {
+                        if (dx * dx + dy * dy <= (SPAWN_RADIUS + 0.5) * (SPAWN_RADIUS + 0.5)) {
+                            const nx = bestX + dx;
+                            const ny = bestY + dy;
+                            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                setCellOwner(nx, ny, this.id);
+                            }
+                        }
+                    }
+                }
+                this.recalculateTerritory();
+            }
+
+            recalculateTerritory() {
+                let count = 0;
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let y = 0; y < GRID_SIZE; y++) {
+                        if (ownerGrid[x][y] === this.id) count++;
+                    }
+                }
+                this.territoryCount = count;
+                const pct = (count / (GRID_SIZE * GRID_SIZE)) * 100;
+                if (pct > this.bestPercent) this.bestPercent = pct;
+            }
+
+            update(dt) {
+                if (!this.alive) return;
+
+                // AI Decision Logic
+                if (!this.isPlayer) {
+                    this.updateAI(dt);
+                } else {
+                    this.isBoosting = isBoostingInput && this.boostEnergy > 2;
+                }
+
+                // Handle Boost Energy Drain / Passive Regen
+                if (this.isBoosting && this.boostEnergy > 0) {
+                    this.boostEnergy = Math.max(0, this.boostEnergy - 32 * dt);
+                    if (this.boostEnergy <= 0) this.isBoosting = false;
+                } else {
+                    this.boostEnergy = Math.min(100, this.boostEnergy + 3 * dt);
+                }
+
+                // Smooth steering interpolation
+                let diff = this.targetAngle - this.angle;
+                while (diff < -Math.PI) diff += Math.PI * 2;
+                while (diff > Math.PI) diff -= Math.PI * 2;
+                const maxTurn = TURN_SPEED * dt;
+                if (Math.abs(diff) < maxTurn) {
+                    this.angle = this.targetAngle;
+                } else {
+                    this.angle += Math.sign(diff) * maxTurn;
+                }
+
+                // Move forward using sub-steps so fast boost movement never skips micro-cells
+                const lvlSpeedMult = this.isPlayer ? 1.0 : getLevelConfig(currentLevel).botSpeedMultiplier;
+                const speed = (this.isBoosting ? BOOST_SPEED : BASE_SPEED) * lvlSpeedMult;
+                const totalDist = speed * dt;
+                const steps = Math.max(1, Math.ceil(totalDist / (CELL_SIZE * 0.5)));
+                const stepDist = totalDist / steps;
+
+                for (let s = 0; s < steps; s++) {
+                    this.x += Math.cos(this.angle) * stepDist;
+                    this.y += Math.sin(this.angle) * stepDist;
+
+                    // World Boundary Collision (Wall Death)
+                    const margin = PLAYER_RADIUS * 0.75;
+                    if (this.x < margin || this.x > WORLD_SIZE - margin || this.y < margin || this.y > WORLD_SIZE - margin) {
+                        this.die('Hit the Arena Wall!', null);
+                        return;
+                    }
+
+                    // Check Grid Cell Transitions
+                    const gx = Math.floor(this.x / CELL_SIZE);
+                    const gy = Math.floor(this.y / CELL_SIZE);
+
+                    if (gx >= 0 && gx < GRID_SIZE && gy >= 0 && gy < GRID_SIZE) {
+                        // Check if hitting any trail
+                        const trailOwnerId = trailGrid[gx][gy];
+                        if (trailOwnerId !== 0) {
+                            if (trailOwnerId === this.id) {
+                                // Ignore the last 4 trail cells right behind the player's body
+                                let isRecent = false;
+                                const checkStart = Math.max(0, this.trailCells.length - 5);
+                                for (let k = checkStart; k < this.trailCells.length; k++) {
+                                    if (this.trailCells[k].gx === gx && this.trailCells[k].gy === gy) {
+                                        isRecent = true;
+                                        break;
+                                    }
+                                }
+                                if (!isRecent) {
+                                    this.die('Crossed your own trail!', null);
+                                    return;
+                                }
+                            } else {
+                                // Eliminated another player by cutting their trail!
+                                const victim = entities.find(e => e.id === trailOwnerId);
+                                if (victim && victim.alive) {
+                                    this.kills++;
+                                    this.boostEnergy = Math.min(100, this.boostEnergy + 45);
+                                    victim.die(`Eliminated by ${this.name}!`, this);
+                                    if (this.isPlayer) {
+                                        showToast(`Eliminated ${victim.name}! +45% Boost`, '#e11d48');
+                                    }
+                                }
+                            }
+                        }
+
+                        // Stepping into a new grid cell
+                        if (gx !== this.lastGridPos.gx || gy !== this.lastGridPos.gy) {
+                            this.lastGridPos = { gx, gy };
+                            const cellOwner = ownerGrid[gx][gy];
+
+                            if (cellOwner !== this.id) {
+                                // Start smooth ribbon from exact exit point if first step outside
+                                if (this.trailPoints.length === 0) {
+                                    this.trailPoints.push({ x: this.x, y: this.y });
+                                }
+                                // Stamp a 1-cell thick brush onto trailGrid for reliable hit detection
+                                if (trailGrid[gx][gy] === 0) {
+                                    trailGrid[gx][gy] = this.id;
+                                    this.trailCells.push({ gx, gy });
+                                    this.trailPoints.push({ x: this.x, y: this.y });
+                                }
+                            } else if (this.trailCells.length > 0) {
+                                // Returned safely to own territory -> CAPTURE ENCLOSED AREA!
+                                this.captureTerritory();
+                            }
+                        }
+                    }
+                }
+            }
+
+            /**
+             * Flood-Fill Capture Algorithm on High-Res Micro-Grid:
+             * 1. Thickens the trail slightly so diagonal steps never leak flood-fill.
+             * 2. Flood-fills from outside borders across any cell NOT owned by this entity.
+             * 3. Any unvisited cell is trapped inside the loop and smoothly captured!
+             */
+            captureTerritory() {
+                const trailLen = this.trailCells.length;
+                for (const pt of this.trailCells) {
+                    trailGrid[pt.gx][pt.gy] = 0;
+                    // Paint a 3x3 micro-brush along the trail path so the ribbon has solid thickness
+                    for (let dx = -1; dx <= 1; dx++) {
+                        for (let dy = -1; dy <= 1; dy++) {
+                            const nx = pt.gx + dx;
+                            const ny = pt.gy + dy;
+                            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                setCellOwner(nx, ny, this.id);
+                            }
+                        }
+                    }
+                }
+                this.trailCells = [];
+                this.trailPoints = [];
+
+                // Visited array for flood fill
+                const visited = Array.from({ length: GRID_SIZE }, () => new Uint8Array(GRID_SIZE));
+                const queue = [];
+
+                // Seed flood fill from all 4 edges of the map where owner !== this.id
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    if (ownerGrid[x][0] !== this.id) { visited[x][0] = 1; queue.push(x * GRID_SIZE); }
+                    if (ownerGrid[x][GRID_SIZE - 1] !== this.id) { visited[x][GRID_SIZE - 1] = 1; queue.push(x * GRID_SIZE + (GRID_SIZE - 1)); }
+                }
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    if (ownerGrid[0][y] !== this.id) { visited[0][y] = 1; queue.push(y); }
+                    if (ownerGrid[GRID_SIZE - 1][y] !== this.id) { visited[GRID_SIZE - 1][y] = 1; queue.push((GRID_SIZE - 1) * GRID_SIZE + y); }
+                }
+
+                // Fast flat-index BFS traversal
+                let head = 0;
+                while (head < queue.length) {
+                    const idx = queue[head++];
+                    const cx = (idx / GRID_SIZE) | 0;
+                    const cy = idx % GRID_SIZE;
+
+                    if (cx + 1 < GRID_SIZE && !visited[cx + 1][cy] && ownerGrid[cx + 1][cy] !== this.id) {
+                        visited[cx + 1][cy] = 1;
+                        queue.push(idx + GRID_SIZE);
+                    }
+                    if (cx - 1 >= 0 && !visited[cx - 1][cy] && ownerGrid[cx - 1][cy] !== this.id) {
+                        visited[cx - 1][cy] = 1;
+                        queue.push(idx - GRID_SIZE);
+                    }
+                    if (cy + 1 < GRID_SIZE && !visited[cx][cy + 1] && ownerGrid[cx][cy + 1] !== this.id) {
+                        visited[cx][cy + 1] = 1;
+                        queue.push(idx + 1);
+                    }
+                    if (cy - 1 >= 0 && !visited[cx][cy - 1] && ownerGrid[cx][cy - 1] !== this.id) {
+                        visited[cx][cy - 1] = 1;
+                        queue.push(idx - 1);
+                    }
+                }
+
+                // Claim all enclosed cells
+                let newlyCaptured = 0;
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let y = 0; y < GRID_SIZE; y++) {
+                        if (!visited[x][y] && ownerGrid[x][y] !== this.id) {
+                            setCellOwner(x, y, this.id);
+                            newlyCaptured++;
+                        }
+                    }
+                }
+
+                const totalGained = trailLen + newlyCaptured;
+                if (totalGained > 0) {
+                    // Reward boost energy proportional to captured territory!
+                    const boostGain = Math.min(55, (totalGained / 14) * 1.4);
+                    this.boostEnergy = Math.min(100, this.boostEnergy + boostGain);
+
+                    // Spawn celebratory particles
+                    const particleCount = Math.min(22, Math.ceil(totalGained / 15));
+                    for (let i = 0; i < particleCount; i++) {
+                        particles.push({
+                            x: this.x + (Math.random() - 0.5) * 45,
+                            y: this.y + (Math.random() - 0.5) * 45,
+                            vx: (Math.random() - 0.5) * 140,
+                            vy: (Math.random() - 0.5) * 140,
+                            life: 0.5,
+                            maxLife: 0.5,
+                            color: this.palette.main,
+                            size: 4.5
+                        });
+                    }
+
+                    const displayScore = Math.max(1, Math.round(totalGained / 12));
+                    if (this.isPlayer && displayScore >= 5) {
+                        floatingTexts.push({
+                            x: this.x,
+                            y: this.y - 22,
+                            text: `+${displayScore} Area! ⚡`,
+                            life: 1.1,
+                            color: this.palette.dark
+                        });
+                    }
+                }
+
+                // Update everyone's territory count
+                entities.forEach(e => { if (e.alive) e.recalculateTerritory(); });
+            }
+
+            /**
+             * Smart NPC Bot Behavior:
+             * - Avoids walls & own trail
+             * - Ventures out to draw loops and returns to base to capture land
+             * - Hunts nearby vulnerable trails when safe
+             * - Uses boost strategically to escape or secure big captures
+             */
+            updateAI(dt) {
+                this.aiTimer -= dt;
+                const gx = Math.floor(this.x / CELL_SIZE);
+                const gy = Math.floor(this.y / CELL_SIZE);
+                const inOwnBase = (gx >= 0 && gx < GRID_SIZE && gy >= 0 && gy < GRID_SIZE && ownerGrid[gx][gy] === this.id);
+
+                // 1. Wall Avoidance Override
+                const wallMargin = 140;
+                if (this.x < wallMargin || this.x > WORLD_SIZE - wallMargin || this.y < wallMargin || this.y > WORLD_SIZE - wallMargin) {
+                    const centerAngle = Math.atan2(WORLD_SIZE / 2 - this.y, WORLD_SIZE / 2 - this.x);
+                    this.targetAngle = centerAngle;
+                    return;
+                }
+
+                // 2. Look ahead to avoid colliding with own trail
+                const lookDist = 68;
+                const aheadX = Math.floor((this.x + Math.cos(this.angle) * lookDist) / CELL_SIZE);
+                const aheadY = Math.floor((this.y + Math.sin(this.angle) * lookDist) / CELL_SIZE);
+                if (aheadX >= 0 && aheadX < GRID_SIZE && aheadY >= 0 && aheadY < GRID_SIZE) {
+                    if (trailGrid[aheadX][aheadY] === this.id) {
+                        this.targetAngle += Math.PI * 0.65;
+                        return;
+                    }
+                }
+
+                // 3. State Transitions
+                if (inOwnBase) {
+                    this.aiState = 'EXPAND';
+                    this.isBoosting = false;
+                } else if (this.trailCells.length >= this.aiDesiredLength) {
+                    this.aiState = 'RETURN';
+                    // Use boost if carrying a big trail and has energy
+                    if (this.trailCells.length > 48 && this.boostEnergy > 45) {
+                        this.isBoosting = true;
+                    }
+                }
+
+                if (this.aiTimer <= 0) {
+                    this.aiTimer = 0.35 + Math.random() * 0.4;
+
+                    if (this.aiState === 'RETURN') {
+                        // Find nearest owned cell to return safely
+                        const homeCell = this.findNearestOwnedCell(gx, gy);
+                        if (homeCell) {
+                            this.targetAngle = Math.atan2(
+                                (homeCell.gy + 0.5) * CELL_SIZE - this.y,
+                                (homeCell.gx + 0.5) * CELL_SIZE - this.x
+                            );
+                        }
+                    } else {
+                        // Check if an enemy trail is close by to attack!
+                        const enemyTrail = this.findNearbyEnemyTrail(gx, gy, 30);
+                        if (enemyTrail && this.trailCells.length < 22) {
+                            this.targetAngle = Math.atan2(
+                                (enemyTrail.gy + 0.5) * CELL_SIZE - this.y,
+                                (enemyTrail.gx + 0.5) * CELL_SIZE - this.x
+                            );
+                            if (this.boostEnergy > 50) this.isBoosting = true;
+                        } else {
+                            // Make smooth turns to carve clean territories
+                            const turnChoices = [-Math.PI / 2, -Math.PI / 4, 0, Math.PI / 4, Math.PI / 2];
+                            const pick = turnChoices[Math.floor(Math.random() * turnChoices.length)];
+                            this.targetAngle = this.angle + pick;
+                            this.aiDesiredLength = 24 + Math.floor(Math.random() * 38);
+                        }
+                    }
+                }
+            }
+
+            findNearestOwnedCell(gx, gy) {
+                let best = null;
+                let minDist = Infinity;
+                for (let r = 4; r < 95; r += 6) {
+                    for (let dx = -r; dx <= r; dx += 6) {
+                        for (let dy = -r; dy <= r; dy += 6) {
+                            const nx = gx + dx;
+                            const ny = gy + dy;
+                            if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                                if (ownerGrid[nx][ny] === this.id) {
+                                    const d = dx * dx + dy * dy;
+                                    if (d < minDist) {
+                                        minDist = d;
+                                        best = { gx: nx, gy: ny };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (best) return best;
+                }
+                return null;
+            }
+
+            findNearbyEnemyTrail(gx, gy, radius) {
+                for (let dx = -radius; dx <= radius; dx += 2) {
+                    for (let dy = -radius; dy <= radius; dy += 2) {
+                        const nx = gx + dx;
+                        const ny = gy + dy;
+                        if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                            const tid = trailGrid[nx][ny];
+                            if (tid !== 0 && tid !== this.id) {
+                                return { gx: nx, gy: ny };
+                            }
+                        }
+                    }
+                }
+                return null;
+            }
+
+            die(reason, killer) {
+                if (!this.alive) return;
+                this.alive = false;
+
+                // Explosion particles
+                for (let i = 0; i < 35; i++) {
+                    particles.push({
+                        x: this.x,
+                        y: this.y,
+                        vx: (Math.random() - 0.5) * 320,
+                        vy: (Math.random() - 0.5) * 320,
+                        life: 0.75,
+                        maxLife: 0.75,
+                        color: this.palette.main,
+                        size: 5 + Math.random() * 4
+                    });
+                }
+
+                // Clear trail and territory (or transfer territory to killer!)
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    for (let y = 0; y < GRID_SIZE; y++) {
+                        if (trailGrid[x][y] === this.id) trailGrid[x][y] = 0;
+                        if (ownerGrid[x][y] === this.id) {
+                            ownerGrid[x][y] = killer && killer.alive ? killer.id : 0;
+                        }
+                    }
+                }
+                this.trailCells = [];
+                this.trailPoints = [];
+                if (killer && killer.alive) killer.recalculateTerritory();
+
+                if (this.isPlayer) {
+                    triggerGameOver(reason);
+                } else {
+                    // Respawn NPC bot after 2.5 seconds to keep arena lively
+                    setTimeout(() => {
+                        if (!isRunning) return;
+                        this.alive = true;
+                        this.kills = 0;
+                        this.boostEnergy = 40;
+                        this.spawn();
+                    }, 2500);
+                }
+            }
+        }
+
+        function setCellOwner(gx, gy, id) {
+            ownerGrid[gx][gy] = id;
+        }
+
+        // --- ORBS (ENERGY POINTS FOR BOOST) ---
+        function spawnOrb() {
+            const margin = CELL_SIZE * 2;
+            orbs.push({
+                x: margin + Math.random() * (WORLD_SIZE - margin * 2),
+                y: margin + Math.random() * (WORLD_SIZE - margin * 2),
+                value: 20, // Gives +20% boost energy
+                pulse: Math.random() * Math.PI * 2
+            });
+        }
+
+        // --- START & RESET GAME ---
+        function startGame() {
+            const cfg = getLevelConfig(currentLevel);
+
+            // Initialize grids
+            ownerGrid = Array.from({ length: GRID_SIZE }, () => new Uint8Array(GRID_SIZE));
+            trailGrid = Array.from({ length: GRID_SIZE }, () => new Uint8Array(GRID_SIZE));
+            entities = [];
+            orbs = [];
+            particles = [];
+            floatingTexts = [];
+
+            const playerName = playerNameInput.value.trim() || 'Player';
+            // Randomly assign a fresh color palette each game
+            const randomColorIdx = Math.floor(Math.random() * PALETTES.length);
+            const playerPalette = PALETTES[randomColorIdx];
+
+            // Create Human Player (ID = 1)
+            player = new Entity(1, playerName, playerPalette, true);
+            entities.push(player);
+
+            // Create NPC Bots (ID = 2..N) using remaining palettes
+            let botPalettePool = PALETTES.filter((_, idx) => idx !== randomColorIdx);
+            for (let i = 0; i < cfg.botCount; i++) {
+                const pal = botPalettePool[i % botPalettePool.length];
+                const name = BOT_NAMES[i % BOT_NAMES.length];
+                const bot = new Entity(i + 2, name, pal, false);
+                entities.push(bot);
+            }
+
+            // Populate initial Energy Orbs
+            for (let i = 0; i < MAX_ORBS; i++) {
+                spawnOrb();
+            }
+
+            // Update Level HUD Labels
+            levelBadge.innerText = `Level ${cfg.level}`;
+            levelGoalText.innerText = `${cfg.targetPercent}%`;
+
+            // Switch UI overlays
+            startScreen.classList.add('hidden');
+            levelCompleteScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            hud.classList.remove('hidden');
+            bottomHud.classList.remove('hidden');
+
+            isRunning = true;
+            lastTime = performance.now();
+            requestAnimationFrame(gameLoop);
+        }
+
+        function triggerLevelComplete(currentPct) {
+            isRunning = false;
+            const nextCfg = getLevelConfig(currentLevel + 1);
+            document.getElementById('levelCompleteTitle').innerText = `LEVEL ${currentLevel} CLEAR!`;
+            document.getElementById('nextLevelPreview').innerText = `Next Up: Level ${nextCfg.level} (Goal: ${nextCfg.targetPercent}% Area)`;
+            document.getElementById('clearPercent').innerText = currentPct.toFixed(1) + '%';
+            document.getElementById('clearKills').innerText = player.kills;
+
+            hud.classList.add('hidden');
+            bottomHud.classList.add('hidden');
+            joystickZone.classList.add('hidden');
+            levelCompleteScreen.classList.remove('hidden');
+        }
+
+        function triggerGameOver(reason) {
+            isRunning = false;
+            document.getElementById('deathReason').innerText = reason;
+            document.getElementById('finalPercent').innerText = player.bestPercent.toFixed(1) + '%';
+            document.getElementById('finalKills').innerText = player.kills;
+            restartBtn.innerText = `RETRY LEVEL ${currentLevel}`;
+            hud.classList.add('hidden');
+            bottomHud.classList.add('hidden');
+            joystickZone.classList.add('hidden');
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        // --- INPUT HANDLERS (MOBILE TOUCH + DESKTOP MOUSE/KEYBOARD) ---
+        
+        // Touch Joystick Controls
+        canvas.addEventListener('touchstart', (e) => {
+            if (!isRunning || !player || !player.alive) return;
+            e.preventDefault();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (touchId === null) {
+                    touchId = t.identifier;
+                    touchStart = { x: t.clientX, y: t.clientY };
+                    joystickZone.classList.remove('hidden');
+                    joystickBase.style.left = `${t.clientX}px`;
+                    joystickBase.style.top = `${t.clientY}px`;
+                    joystickStick.style.transform = `translate(0px, 0px)`;
+                }
+            }
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (!isRunning || !player || !player.alive) return;
+            e.preventDefault();
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                const t = e.changedTouches[i];
+                if (t.identifier === touchId) {
+                    const dx = t.clientX - touchStart.x;
+                    const dy = t.clientY - touchStart.y;
+                    const dist = Math.hypot(dx, dy);
+
+                    if (dist > 8) {
+                        player.targetAngle = Math.atan2(dy, dx);
+                    }
+
+                    // Move visual joystick knob
+                    const maxRadius = 35;
+                    const clampedDist = Math.min(dist, maxRadius);
+                    const angle = Math.atan2(dy, dx);
+                    joystickStick.style.transform = `translate(${Math.cos(angle) * clampedDist}px, ${Math.sin(angle) * clampedDist}px)`;
+                }
+            }
+        }, { passive: false });
+
+        const endTouch = (e) => {
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === touchId) {
+                    touchId = null;
+                    joystickZone.classList.add('hidden');
+                }
+            }
+        };
+        canvas.addEventListener('touchend', endTouch);
+        canvas.addEventListener('touchcancel', endTouch);
+
+        // Desktop Mouse Steering (Hold left click or move cursor if desired)
+        let isMouseDown = false;
+        canvas.addEventListener('mousedown', (e) => {
+            if (!isRunning || !player || !player.alive) return;
+            isMouseDown = true;
+            updateMouseAngle(e);
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!isRunning || !player || !player.alive || !isMouseDown) return;
+            updateMouseAngle(e);
+        });
+        window.addEventListener('mouseup', () => { isMouseDown = false; });
+
+        function updateMouseAngle(e) {
+            const cx = viewWidth / 2;
+            const cy = viewHeight / 2;
+            player.targetAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
+        }
+
+        // Keyboard Arrows / WASD + Spacebar Boost
+        window.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+            if (e.code === 'Space' || e.code === 'ShiftLeft') {
+                isBoostingInput = true;
+                boostBtn.classList.add('boost-btn-active');
+            }
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+            if (e.code === 'Space' || e.code === 'ShiftLeft') {
+                isBoostingInput = false;
+                boostBtn.classList.remove('boost-btn-active');
+            }
+        });
+
+        // Mobile Boost Button Touch & Mouse Events
+        const startBoost = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isBoostingInput = true;
+            boostBtn.classList.add('boost-btn-active');
+        };
+        const stopBoost = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            isBoostingInput = false;
+            boostBtn.classList.remove('boost-btn-active');
+        };
+        boostBtn.addEventListener('touchstart', startBoost, { passive: false });
+        boostBtn.addEventListener('touchend', stopBoost);
+        boostBtn.addEventListener('touchcancel', stopBoost);
+        boostBtn.addEventListener('mousedown', startBoost);
+        boostBtn.addEventListener('mouseup', stopBoost);
+        boostBtn.addEventListener('mouseleave', stopBoost);
+
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+        nextLevelBtn.addEventListener('click', () => {
+            currentLevel++;
+            startGame();
+        });
+
+        // --- MAIN UPDATE LOOP ---
+        function update(dt) {
+            // Keyboard directional steering support
+            if (player && player.alive) {
+                let kx = 0, ky = 0;
+                if (keys['ArrowUp'] || keys['KeyW']) ky -= 1;
+                if (keys['ArrowDown'] || keys['KeyS']) ky += 1;
+                if (keys['ArrowLeft'] || keys['KeyA']) kx -= 1;
+                if (keys['ArrowRight'] || keys['KeyD']) kx += 1;
+                if (kx !== 0 || ky !== 0) {
+                    player.targetAngle = Math.atan2(ky, kx);
+                }
+            }
+
+            // Update all entities
+            for (const ent of entities) {
+                ent.update(dt);
+            }
+
+            // Head-to-Head Collision Check between entities
+            for (let i = 0; i < entities.length; i++) {
+                for (let j = i + 1; j < entities.length; j++) {
+                    const a = entities[i];
+                    const b = entities[j];
+                    if (!a.alive || !b.alive) continue;
+
+                    const dist = Math.hypot(a.x - b.x, a.y - b.y);
+                    if (dist < PLAYER_RADIUS * 1.8) {
+                        const aInBase = ownerGrid[Math.floor(a.x / CELL_SIZE)]?.[Math.floor(a.y / CELL_SIZE)] === a.id;
+                        const bInBase = ownerGrid[Math.floor(b.x / CELL_SIZE)]?.[Math.floor(b.y / CELL_SIZE)] === b.id;
+
+                        if (aInBase && !bInBase) {
+                            a.kills++;
+                            b.die(`Smashed by ${a.name}!`, a);
+                            if (a.isPlayer) showToast(`Smashed ${b.name}!`, '#10b981');
+                        } else if (bInBase && !aInBase) {
+                            b.kills++;
+                            a.die(`Smashed by ${b.name}!`, b);
+                        } else {
+                            // Shorter trail wins head-on clash
+                            if (a.trailCells.length < b.trailCells.length) {
+                                a.kills++;
+                                b.die(`Outmaneuvered by ${a.name}!`, a);
+                                if (a.isPlayer) showToast(`Eliminated ${b.name}!`, '#10b981');
+                            } else {
+                                b.kills++;
+                                a.die(`Outmaneuvered by ${b.name}!`, b);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Update & Collect Energy Orbs
+            while (orbs.length < MAX_ORBS) spawnOrb();
+            for (let i = orbs.length - 1; i >= 0; i--) {
+                const orb = orbs[i];
+                orb.pulse += dt * 5;
+
+                for (const ent of entities) {
+                    if (!ent.alive) continue;
+                    if (Math.hypot(ent.x - orb.x, ent.y - orb.y) < PLAYER_RADIUS + 14) {
+                        ent.boostEnergy = Math.min(100, ent.boostEnergy + orb.value);
+                        if (ent.isPlayer) {
+                            floatingTexts.push({
+                                x: orb.x,
+                                y: orb.y - 10,
+                                text: '+Boost ⚡',
+                                life: 0.7,
+                                color: '#d97706'
+                            });
+                        }
+                        orbs.splice(i, 1);
+                        break;
+                    }
+                }
+            }
+
+            // Update Particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.life -= dt;
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+
+            // Update Floating Texts
+            for (let i = floatingTexts.length - 1; i >= 0; i--) {
+                const ft = floatingTexts[i];
+                ft.y -= 35 * dt;
+                ft.life -= dt;
+                if (ft.life <= 0) floatingTexts.splice(i, 1);
+            }
+            // Smooth Camera Follow (Exponential frame-rate independent damping)
+            if (player && player.alive) {
+                const lerpFactor = 1 - Math.exp(-10 * dt);
+                camera.x += (player.x - camera.x) * lerpFactor;
+                camera.y += (player.y - camera.y) * lerpFactor;
+            }
+
+            updateHUD();
+        }
+
+        // --- UPDATE HUD & LEADERBOARD ---
+        function updateHUD() {
+            if (!player) return;
+            const cfg = getLevelConfig(currentLevel);
+            const totalCells = GRID_SIZE * GRID_SIZE;
+            const rawPct = (player.territoryCount / totalCells) * 100;
+            const pct = rawPct.toFixed(1);
+
+            playerPercentEl.innerText = `${pct}%`;
+            // Progress bar fills relative to the current level's target goal!
+            const progressRatio = Math.min(100, (rawPct / cfg.targetPercent) * 100);
+            territoryBar.style.width = `${progressRatio}%`;
+            killCountEl.innerText = player.kills;
+            boostBar.style.width = `${player.boostEnergy}%`;
+
+            // Check Level Win Condition
+            if (isRunning && player.alive && rawPct >= cfg.targetPercent) {
+                triggerLevelComplete(rawPct);
+                return;
+            }
+
+            // Sort top 5 entities by territory
+            const sorted = [...entities]
+                .filter(e => e.alive)
+                .sort((a, b) => b.territoryCount - a.territoryCount)
+                .slice(0, 5);
+
+            leaderboardList.innerHTML = sorted.map((ent, idx) => {
+                const p = ((ent.territoryCount / totalCells) * 100).toFixed(1);
+                return `
+                    <div class="flex items-center justify-between gap-2 ${ent.isPlayer ? 'bg-indigo-50 px-1.5 py-0.5 rounded-lg font-extrabold text-indigo-700' : 'text-slate-700'}">
+                        <div class="flex items-center gap-1.5 truncate">
+                            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${ent.palette.main}"></span>
+                            <span class="truncate max-w-[75px]">${idx + 1}. ${ent.name}</span>
+                        </div>
+                        <span>${p}%</span>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // --- RENDER ENGINE ---
+        function render() {
+            ctx.clearRect(0, 0, viewWidth, viewHeight);
+
+            ctx.save();
+            // Center camera on screen
+            ctx.translate(viewWidth / 2, viewHeight / 2);
+            ctx.scale(camera.zoom, camera.zoom);
+            ctx.translate(-camera.x, -camera.y);
+
+            // 1. Draw Arena Floor & Clean Minimalist Grid
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+            // Determine visible grid bounds for performance optimization
+            const halfW = (viewWidth / 2) / camera.zoom;
+            const halfH = (viewHeight / 2) / camera.zoom;
+            const startGX = Math.max(0, Math.floor((camera.x - halfW) / CELL_SIZE) - 2);
+            const endGX = Math.min(GRID_SIZE - 1, Math.ceil((camera.x + halfW) / CELL_SIZE) + 2);
+            const startGY = Math.max(0, Math.floor((camera.y - halfH) / CELL_SIZE) - 2);
+            const endGY = Math.min(GRID_SIZE - 1, Math.ceil((camera.y + halfH) / CELL_SIZE) + 2);
+
+            // Subtle architectural grid lines (every 40px so background feels clean and airy)
+            const majorStep = 40;
+            const gridStartX = Math.max(0, Math.floor((camera.x - halfW) / majorStep) * majorStep);
+            const gridEndX = Math.min(WORLD_SIZE, Math.ceil((camera.x + halfW) / majorStep) * majorStep);
+            const gridStartY = Math.max(0, Math.floor((camera.y - halfH) / majorStep) * majorStep);
+            const gridEndY = Math.min(WORLD_SIZE, Math.ceil((camera.y + halfH) / majorStep) * majorStep);
+
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let x = gridStartX; x <= gridEndX; x += majorStep) {
+                ctx.moveTo(x, gridStartY);
+                ctx.lineTo(x, gridEndY);
+            }
+            for (let y = gridStartY; y <= gridEndY; y += majorStep) {
+                ctx.moveTo(gridStartX, y);
+                ctx.lineTo(gridEndX, y);
+            }
+            ctx.stroke();
+
+            // Lookup map for entity palettes
+            const entityMap = {};
+            for (const e of entities) entityMap[e.id] = e;
+
+            // 2. Draw Captured Territories (Merged Horizontal Runs for Zero Seam Lines & Crisp Edges)
+            for (let gy = startGY; gy <= endGY; gy++) {
+                let runOwner = 0;
+                let runStartGX = startGX;
+
+                for (let gx = startGX; gx <= endGX + 1; gx++) {
+                    const oid = gx <= endGX ? ownerGrid[gx][gy] : 0;
+                    if (oid !== runOwner) {
+                        if (runOwner !== 0 && entityMap[runOwner]) {
+                            const ent = entityMap[runOwner];
+                            const rx = runStartGX * CELL_SIZE;
+                            const ry = gy * CELL_SIZE;
+                            const rw = (gx - runStartGX) * CELL_SIZE;
+
+                            ctx.fillStyle = ent.palette.light;
+                            ctx.fillRect(rx, ry, rw, CELL_SIZE + 0.4);
+                        }
+                        runOwner = oid;
+                        runStartGX = gx;
+                    }
+                }
+            }
+
+            // Crisp 3D Extruded Territory Edges (Renders clean contour borders along territory boundaries)
+            for (let gy = startGY; gy <= endGY; gy++) {
+                for (let gx = startGX; gx <= endGX; gx++) {
+                    const oid = ownerGrid[gx][gy];
+                    if (oid !== 0 && entityMap[oid]) {
+                        // Bottom 3D depth lip
+                        if (gy + 1 < GRID_SIZE && ownerGrid[gx][gy + 1] !== oid) {
+                            ctx.fillStyle = entityMap[oid].palette.main;
+                            ctx.fillRect(gx * CELL_SIZE, (gy + 1) * CELL_SIZE - 3, CELL_SIZE + 0.5, 4);
+                        }
+                        // Clean outer rim highlight on top/left/right edges
+                        if ((gy > 0 && ownerGrid[gx][gy - 1] !== oid) ||
+                            (gx > 0 && ownerGrid[gx - 1][gy] !== oid) ||
+                            (gx + 1 < GRID_SIZE && ownerGrid[gx + 1][gy] !== oid)) {
+                            ctx.fillStyle = entityMap[oid].palette.main;
+                            ctx.fillRect(gx * CELL_SIZE, gy * CELL_SIZE, CELL_SIZE + 0.5, CELL_SIZE + 0.5);
+                        }
+                    }
+                }
+            }
+
+            // 2.5 Draw Smooth Continuous Vector Trail Ribbons
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            for (const ent of entities) {
+                if (!ent.alive || ent.trailPoints.length === 0) continue;
+
+                ctx.strokeStyle = ent.palette.trail;
+                ctx.lineWidth = 14;
+                ctx.beginPath();
+                ctx.moveTo(ent.trailPoints[0].x, ent.trailPoints[0].y);
+                for (let i = 1; i < ent.trailPoints.length; i++) {
+                    ctx.lineTo(ent.trailPoints[i].x, ent.trailPoints[i].y);
+                }
+                // Connect smoothly right into the player's current position
+                ctx.lineTo(ent.x, ent.y);
+                ctx.stroke();
+            }
+
+            // 3. Draw Arena Outer Danger Border
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 8;
+            ctx.strokeRect(0, 0, WORLD_SIZE, WORLD_SIZE);
+
+            // 4. Draw Energy Orbs (Boost Points)
+            for (const orb of orbs) {
+                if (orb.x < camera.x - halfW - 30 || orb.x > camera.x + halfW + 30 ||
+                    orb.y < camera.y - halfH - 30 || orb.y > camera.y + halfH + 30) continue;
+
+                const r = 7 + Math.sin(orb.pulse) * 2;
+                // Outer glow
+                ctx.fillStyle = 'rgba(251, 191, 36, 0.3)';
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, r + 6, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Core orb
+                ctx.fillStyle = '#f59e0b';
+                ctx.beginPath();
+                ctx.arc(orb.x, orb.y, r, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#fef3c7';
+                ctx.beginPath();
+                ctx.arc(orb.x - 2, orb.y - 2, r * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 5. Draw Particles
+            for (const p of particles) {
+                ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // 6. Draw Players & NPC Bots (Paper Cube / Block Style)
+            for (const ent of entities) {
+                if (!ent.alive) continue;
+
+                ctx.save();
+                ctx.translate(ent.x, ent.y);
+
+                // Boost Aura Ring
+                if (ent.isBoosting) {
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, PLAYER_RADIUS + 6, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Rotate body
+                ctx.save();
+                ctx.rotate(ent.angle);
+
+                // 3D Shadow base
+                ctx.fillStyle = ent.palette.dark;
+                ctx.beginPath();
+                ctx.roundRect(-PLAYER_RADIUS, -PLAYER_RADIUS + 4, PLAYER_RADIUS * 2, PLAYER_RADIUS * 2, 7);
+                ctx.fill();
+
+                // Main Paper Block Body
+                ctx.fillStyle = ent.palette.main;
+                ctx.beginPath();
+                ctx.roundRect(-PLAYER_RADIUS, -PLAYER_RADIUS, PLAYER_RADIUS * 2, PLAYER_RADIUS * 2, 7);
+                ctx.fill();
+
+                // Cute eyes looking forward
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(5, -5, 3.2, 0, Math.PI * 2);
+                ctx.arc(5, 5, 3.2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.arc(6.2, -5, 1.6, 0, Math.PI * 2);
+                ctx.arc(6.2, 5, 1.6, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+
+                // Floating Name Tag
+                ctx.font = '700 12px Fredoka, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#1e293b';
+                ctx.fillText(ent.name, 0, -PLAYER_RADIUS - 8);
+
+                ctx.restore();
+            }
+
+            // 7. Draw Floating Texts
+            for (const ft of floatingTexts) {
+                ctx.globalAlpha = Math.min(1, ft.life);
+                ctx.font = '700 15px Fredoka, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = ft.color;
+                ctx.fillText(ft.text, ft.x, ft.y);
+            }
+            ctx.globalAlpha = 1;
+
+            ctx.restore();
+
+            // 8. Render Mini-map
+            renderMinimap(entityMap);
+        }
+
+        function renderMinimap(entityMap) {
+            const mw = minimapCanvas.width;
+            const mh = minimapCanvas.height;
+            minimapCtx.clearRect(0, 0, mw, mh);
+
+            const step = 2; // Sample every 2nd micro-cell for crisp, fast minimap
+            const scaleX = (mw / GRID_SIZE) * step;
+            const scaleY = (mh / GRID_SIZE) * step;
+
+            for (let gx = 0; gx < GRID_SIZE; gx += step) {
+                for (let gy = 0; gy < GRID_SIZE; gy += step) {
+                    const oid = ownerGrid[gx][gy];
+                    if (oid !== 0 && entityMap[oid]) {
+                        minimapCtx.fillStyle = entityMap[oid].palette.main;
+                        minimapCtx.fillRect((gx / step) * scaleX, (gy / step) * scaleY, Math.ceil(scaleX), Math.ceil(scaleY));
+                    }
+                }
+            }
+
+            // Draw entity dots
+            for (const ent of entities) {
+                if (!ent.alive) continue;
+                const mx = (ent.x / WORLD_SIZE) * mw;
+                const my = (ent.y / WORLD_SIZE) * mh;
+                minimapCtx.fillStyle = ent.isPlayer ? '#ffffff' : ent.palette.dark;
+                minimapCtx.beginPath();
+                minimapCtx.arc(mx, my, ent.isPlayer ? 3.5 : 2, 0, Math.PI * 2);
+                minimapCtx.fill();
+                if (ent.isPlayer) {
+                    minimapCtx.strokeStyle = '#0f172a';
+                    minimapCtx.lineWidth = 1.5;
+                    minimapCtx.stroke();
+                }
+            }
+        }
+
+        // --- MAIN ANIMATION LOOP ---
+        function gameLoop(now) {
+            if (!isRunning) return;
+            const dt = Math.min(0.05, (now - lastTime) / 1000);
+            lastTime = now;
+
+            update(dt);
+            render();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Initialize UI on load
+        window.onload = () => {
+            initUI();
+            resizeCanvas();
+        };
+    </script>
+</body>
+</html>
